@@ -3,29 +3,441 @@
   The goal of this exercise is to replicate the Kubernetes the hard way[fn:1]
   steps by using NixOS and NixOps as much as possible.
 
-* The basic setup
+* Creating the network configuration
 
-  We want to have a self-contained setup. These environment variables are used
-  during our exercise.
+  We use the machine ~nix.gesz.dev~ for the nix deployment. It already contains
+  NixOS.
   
-  | Name         | Value                      | Meaning                                               |
-  | NIXOPS_STATE | .nixops/deployments.nixops | Path to the state file that contains the deployments. |
+  Let's check the ~hardware-configuration.nix~ file:
 
-  First, create a network file called ~nix-the-hard-way.nix~:
+  #+begin_src bash :results verbatim :exports both :wrap src nix
+    ssh root@nix.gesz.dev -- cat /etc/nixos/hardware-configuration.nix
+  #+end_src
 
+  #+RESULTS:
+  #+begin_src nix
+  { modulesPath, ... }:
+  {
+    imports = [ (modulesPath + "/profiles/qemu-guest.nix") ];
+    boot.loader.grub = {
+      efiSupport = true;
+      efiInstallAsRemovable = true;
+      device = "nodev";
+    };
+    fileSystems."/boot" = { device = "/dev/disk/by-uuid/3A52-0EBB"; fsType = "vfat"; };
+    boot.initrd.kernelModules = [ "nvme" ];
+    fileSystems."/" = { device = "/dev/vda1"; fsType = "ext4"; };
+  }
+  #+end_src
+
+  Let's check the ~configuration.nix~ file:
+
+  #+begin_src bash :results verbatim :exports both :wrap src nix
+    ssh root@nix.gesz.dev -- cat /etc/nixos/configuration.nix
+  #+end_src
+
+  #+RESULTS:
+  #+begin_src nix
+  { ... }: {
+    imports = [
+      ./hardware-configuration.nix
+
+      ./host.nix
+    ];
+
+    boot.cleanTmpDir = true;
+    networking.hostName = "kube-nix";
+    networking.firewall.allowPing = true;
+    services.openssh.enable = true;
+    users.users.root.openssh.authorizedKeys.keys = [
+      "#" 
+      "# WARNING: Automatically generated file" 
+      "# This file will be erased at every boot" 
+      "# This file was generated with '/usr/sbin/scw-fetch-ssh-keys'" 
+      "#" 
+      "# To add a new key, you can:" 
+      "#   -- Add keys on your Scaleway account https://cloud.scaleway.com/#/credentials" 
+      "#   -- Add keys using server tags - https://cloud.scaleway.com/#/servers/32e3281e-11fc-481c-a91d-c8b6604356bf" 
+      "ssh-rsa_XXXXXXXXXXX AUTHORIZED_KEY=ssh-rsa_YYYYYYYYYYYYYYY"" 
+      "#        - Be sure to replace all spaces with underscores" 
+      "#        - $> sed 's/ /_/g' ~/.ssh/id_rsa.pub" 
+      "#   -- Add the keys to '/root/.ssh/instance_keys' which will be imported" 
+      "#" 
+      "# And recreate your 'authorized_keys' file with the new keys:" 
+      "ssh-keys --upgrade'" 
+      "#" 
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDcqgbFZJSjDy/7tl3f9xdcjhHHtAFLkdNE9YGxYa3NK+J/BIvGSGM19GGhMhv8gU00RDoOY4VnDoFDdTeMjfYr6588H961rsmf9ODkaSMBy/kMJC5+RNOeAoTiy7WV/1FEaFSseqeK+HWYwymbn6YnPGBwpE0EbQ2rPMY7dVVeZOBkGqBjlUxtz7hiuDpY7McWNLniySBIeyjrONqTSDprD3Fd3oT7R9LJuTmHKVwubT9RNtWG//6M1Az5qA76QWYNQhwOymtDF8Yz40ELrXQTE4tpj/jKZKkYLU6up2IeebAvSDkQhBfrcMbxJ6lRn54/q0QvOR0i3PeXYrcTv/rJ egersza@HU00053467" 
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDHCZhjiUXp7xUK84j+8kP3Ke8Dvbt25j4NFdmrbH23Irc0di06XH+/hAvr4LOvH9nRH1I7bZRGBsRuauUzfsoaD+BfmzrSgfWT35pm6rNFfoCceebTXH2q7zTzZc4AhmTJzq4edEoe0WorGEcEeVBO5+MQx0T5yGLT8sKAFUJ5Qj/OCzVseZccXgvEzCjLMb4H2l0vJkgV/Y0pR7KRYLMXwuqRCA+BwJY0ABXnzqyibkms0uPnmfazff1fQtw9+1cJacH5IWVppfCV5vnWibZaps3uQujkTU4EmHYPDNQ1O64nJ2VG6oWNGaQR4ByTA1J7o6KL1ozlqx0qyYKsJJRL gergely@THOR" 
+      "ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA26/jzt4f8cKEFmMfLXAkpSjEAa75mYCC0FApsqrqOxmRq+YPFGqRrK+2+QYvp2iKxAuPBufl+2NXx6VmuK0SqdwDHgJ2ftDDlvSDVE9LLfp9cNOD3/gtEqU18zKsDfTpNvxXpJQAmzK7ygKqkDEK51EP7mxL/5q0V0O6bYluoOlm8hnqYEJtLm0WYv0hehV+cLPJL/AhefprGmbWmBkgc81DWnHLZcdMwYIu0GajKu1foDPuJP1ePNHJtyRkMhJ00Z88MuYa5MQ4rpSYhZ7I1Posm4ndkRq4TjmvXbdKrIaOyX4/HK+TfwTkosOM8zdRGwP35TUhn4ELOgmKYlmYMw== gergely79@gmail.com" 
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCe/Bz3qnhVzN9rNIx2hJUrDAXyODrrGVJcP6+LoUlv9xh+UmCNgFqIBs4OSmDmAN0BqCz/PqZJ1/bsMNhjiWh0rT7N+KCOmLtjtzufRD6AnU2HWWM2xOSIUBphxExcJXyf9zLUM2oNWLXMLRCZiaIYJpkmzxyxYN1KsC7Uvyw2/nlVJJF5fzSsuvUS/PyukseWjeH5hBB/8brCFJKnOZG8KA69o2j+CrrqW4riksLnN4zcbVwEq6ZHw/MPC1WqlqWTLEQSc2dG+ak6ejGEQG+0/YXc+rk2V5GmWqKG9xV/jAvvtEez67DwBD8+xOVqXdsN0p0gD6C2tcOAw7JV06xl gerge@Erik" 
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCeYA7eQp3o3oEndmOLhdjWA7BU3lFD2djJDpYdRPUcFeHZmFd/24K5TjpDEU7XO07Yzuy94YmVaWmg5/txJ1avhc89eSl3Dydg2hmPkjgvMukamodoCgFu46aRHtmQd7tjwBuBZOFHPRlEkfDiIwMMT7E2ASQtEfjC/OPLjti0TgCknkzJlV7SeXHvZUrtu/GCiR1HQDvKOWQYil3KQz4en+66YjEK0283AcidQpsNNFvJrvcXmA1VkE+rTqZ4LXT0A4D5lNioi6EjaXd1ZsE8C9R5R88wk5HqajNQVJ50GxLsh1FwItV3qibUeMd6KVe79/pmbNpKlZ0kUoBnu22b egersza@crt0" 
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3luLP4zUjd+AX7VA2LTBkCNVv9OA/nPT4cBqHmilGS84LiWC15zFTc84ybqWPmxme0Y9ACR0ok1p8InmuCUSTdgzQ2b2JakxH9ryS4uyKCmxRhrN7z3b3fOax5SHW5P6MGhvvVNpzef5b/OpqLEsfxO4AjgRgk1gx/6Z8y4333N/D74jO8Da1x/3KTpIi0MBMSGUShce2b6sny64s4covW0wcEniCXc86HjG/mn9lP91dpyXydt9gNYFvg2fby+u4WCXSwCelHSVL8hb8piuw/2cAhveDnzgCgoF2HISan5yg394giEssheU1ySGU+MtuxoErUb/6isxX7ewoEKMV gergely@gregorian" 
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDazaG1XT0UDy0OVGJqeGadW8LjA4VFkk34yPPM6iRSiUjqqghfmsVWopgqcRunAcwfmp46prH9EDvEsf/BO36UdjIagYAy+VooDvMSh1XChflsTLVvuLtblZln47Yd7IYqqhqXVWIJ/XSgO35ttwpe8aeNjcCIgBC/MvEhVrgrNwyC6/JkvoPPmjSape8xVWFew8LMRj/iv2C7TXhnYvZslVDsoz6GV5KndKX2/rqp3Of/TmvTyWkveXf08VF2l60nXoIORH9CHsV/Lia426fpo3RiDM12hCQxzKnZ1mytLLx/5sQ225BIhVIKCVAPsWmxFkOZKhuTVdRekGzZpfoZ gergely@scw-nostalgic-hellman" 
+      "# Below your custom ssh keys from '/root/.ssh/instance_keys'" 
+    ];
+  }
+  #+end_src
+
+  And finally let's see the ~host.nix~ file:
+  
+  #+begin_src bash :results verbatim :exports both :wrap src nix
+    ssh root@nix.gesz.dev -- cat /etc/nixos/host.nix
+  #+end_src
+
+  #+RESULTS:
+  #+begin_src nix
+  {pkgs, ...}:
+  {
+    environment.systemPackages = with pkgs; [ neofetch vim ];
+  }
+  #+end_src
+  
+  The ~nix-the-hard-way.nix~ file describes the machine configuration of the
+  machines managed by NixOps. The ~nix.gesz.dev~ machine is referred to as
+  ~kube-nix~. The data from the ~hardware-configuration.nix~,
+  ~configuration.nix~ and ~host.nix~ files is merged there:
+  
   #+name: Initial version of nix-the-hard-way.nix
-  #+begin_src nix :tangle nix-the-hard-way.nix
+  #+begin_src nix
     {
-      nix =
+      network.description = "Nix the hard way, experimental Kubernetes deployment";
+      kube-nix =
         { config, pkgs, modulesPath, ... }:
         {
           deployment = {
             targetHost = "nix.gesz.dev";
           };
+    
+          imports = [ (modulesPath + "/profiles/qemu-guest.nix") ];
+    
+          boot = {
+            loader.grub = {
+              efiSupport = true;
+              efiInstallAsRemovable = true;
+              device = "nodev";
+            };
+            initrd.kernelModules = [ "nvme" ];
+            cleanTmpDir = true;
+          };
+    
+          networking = {
+            hostName = "kube-nix";
+            firewall.allowPing = true;
+          };
+    
+          services = {
+            openssh.enable = true;
+          };
+    
+          users.users.root.openssh.authorizedKeys.keys = [
+            "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3luLP4zUjd+AX7VA2LTBkCNVv9OA/nPT4cBqHmilGS84LiWC15zFTc84ybqWPmxme0Y9ACR0ok1p8InmuCUSTdgzQ2b2JakxH9ryS4uyKCmxRhrN7z3b3fOax5SHW5P6MGhvvVNpzef5b/OpqLEsfxO4AjgRgk1gx/6Z8y4333N/D74jO8Da1x/3KTpIi0MBMSGUShce2b6sny64s4covW0wcEniCXc86HjG/mn9lP91dpyXydt9gNYFvg2fby+u4WCXSwCelHSVL8hb8piuw/2cAhveDnzgCgoF2HISan5yg394giEssheU1ySGU+MtuxoErUb/6isxX7ewoEKMV gergely@gregorian"
+          ];
+          fileSystems."/boot" = { device = "/dev/disk/by-uuid/3A52-0EBB"; fsType = "vfat"; };
+          fileSystems."/" = { device = "/dev/vda1"; fsType = "ext4"; };
+    
+    
+          environment.systemPackages = with pkgs; [ neofetch vim ];
         };
     }
   #+end_src
   
-* Footnotes
+* Creating the NixOps state file
 
-[fn:1] https://github.com/kelseyhightower/kubernetes-the-hard-way/tree/79a3f79b27bd28f82f071bb877a266c2e62ee506
+  We want to have a self-contained setup. The NixOps state file will be located
+  in the project directory. This environment variable is used during our
+  exercise.
+  
+  | Name         | Value                      | Meaning                                               |
+  | NIXOPS_STATE | .nixops/deployments.nixops | Path to the state file that contains the deployments. |
+
+  We can now create the state file. The name of the network is ~hard-way~.
+  
+  #+begin_src bash :results verbatim :exports both
+    nixops create nix-the-hard-way.nix -d hard-way
+  #+end_src
+
+  #+RESULTS:
+  : c7564a68-ebc4-11eb-b9d9-e93ffdca2ec3
+  
+  Then we can check, what we have configured.
+
+  #+begin_src bash :results verbatim :exports both
+    nixops info -d hard-way
+  #+end_src
+
+  #+RESULTS:
+  #+begin_example
+  Network name: hard-way
+  Network UUID: c7564a68-ebc4-11eb-b9d9-e93ffdca2ec3
+  Network description: Nix the hard way, experimental Kubernetes deployment
+  Nix expressions: /home/gergely/nix/nixops-the-hard-way/nix-the-hard-way.nix
+
+  +----------+---------+------+-------------+------------+
+  | Name     |  Status | Type | Resource Id | IP address |
+  +----------+---------+------+-------------+------------+
+  | kube-nix | Missing | none |             |            |
+  +----------+---------+------+-------------+------------+
+  #+end_example
+
+  Let's check the status of the machine:
+
+  #+begin_src bash :results verbatim :exports both
+    set -euo pipefail
+    
+    nixops check || true
+  #+end_src
+
+  #+RESULTS:
+  #+begin_example
+  Machines state:
+  +------+--------+----+-----------+----------+-----------+-------+-------+
+  | Name | Exists | Up | Reachable | Disks OK | Load avg. | Units | Notes |
+  +------+--------+----+-----------+----------+-----------+-------+-------+
+  +------+--------+----+-----------+----------+-----------+-------+-------+
+  Non machines resources state:
+  +------+--------+
+  | Name | Exists |
+  +------+--------+
+  +------+--------+
+  #+end_example
+
+  Hmm, nothing is here. Let's deploy the network:
+
+  #+begin_src bash :results verbatim :exports both
+    nixops deploy -d hard-way
+  #+end_src
+
+  #+RESULTS:
+
+  Let's check the network again:
+
+  #+begin_src bash :results verbatim :exports both
+    set -euo pipefail
+    
+    nixops check || true
+  #+end_src
+
+  #+RESULTS:
+  #+begin_example
+  Machines state:
+  +----------+--------+-----+-----------+----------+----------------+-----------------------+-------+
+  | Name     | Exists | Up  | Reachable | Disks OK | Load avg.      | Units                 | Notes |
+  +----------+--------+-----+-----------+----------+----------------+-----------------------+-------+
+  | kube-nix | Yes    | Yes | Yes       | N/A      | 0.45 0.20 0.08 | ● home.mount [failed] |       |
+  |          |        |     |           |          |                | ● tmp.mount [failed]  |       |
+  +----------+--------+-----+-----------+----------+----------------+-----------------------+-------+
+  Non machines resources state:
+  +------+--------+
+  | Name | Exists |
+  +------+--------+
+  +------+--------+
+  #+end_example
+
+** What are those failed units?
+
+  #+begin_src bash :results verbatim :exports both
+    set -euo pipefail
+    
+    nixops ssh kube-nix -- systemctl list-units --failed
+  #+end_src
+
+  #+RESULTS:
+  :   UNIT LOAD ACTIVE SUB DESCRIPTION
+  : 0 loaded units listed.
+
+  All units seems to be okay.
+  
+  #+begin_src bash :results verbatim :exports both
+    set -euo pipefail
+    
+    nixops ssh kube-nix -- systemctl status home.mount 
+  #+end_src
+
+  #+RESULTS:
+
+  Let's see the mounts.
+  #+begin_src bash :results verbatim :exports both
+    set -euo pipefail
+    
+    nixops ssh kube-nix -- mount
+  #+end_src
+
+  #+RESULTS:
+  #+begin_example
+  devtmpfs on /dev type devtmpfs (rw,nosuid,size=101888k,nr_inodes=252590,mode=755)
+  devpts on /dev/pts type devpts (rw,nosuid,noexec,relatime,gid=3,mode=620,ptmxmode=666)
+  tmpfs on /dev/shm type tmpfs (rw,nosuid,nodev)
+  proc on /proc type proc (rw,nosuid,nodev,noexec,relatime)
+  tmpfs on /run type tmpfs (rw,nosuid,nodev,size=509440k,mode=755)
+  none on /run/keys type ramfs (rw,nosuid,nodev,relatime,mode=750)
+  tmpfs on /run/wrappers type tmpfs (rw,nodev,relatime,mode=755)
+  sysfs on /sys type sysfs (rw,nosuid,nodev,noexec,relatime)
+  /dev/vda1 on / type ext4 (rw,relatime)
+  /dev/vda1 on /nix/store type ext4 (ro,relatime)
+  securityfs on /sys/kernel/security type securityfs (rw,nosuid,nodev,noexec,relatime)
+  tmpfs on /sys/fs/cgroup type tmpfs (ro,nosuid,nodev,noexec,size=4096k,nr_inodes=1024,mode=755)
+  cgroup2 on /sys/fs/cgroup/unified type cgroup2 (rw,nosuid,nodev,noexec,relatime,nsdelegate)
+  cgroup on /sys/fs/cgroup/systemd type cgroup (rw,nosuid,nodev,noexec,relatime,xattr,name=systemd)
+  efivarfs on /sys/firmware/efi/efivars type efivarfs (rw,nosuid,nodev,noexec,relatime)
+  none on /sys/fs/bpf type bpf (rw,nosuid,nodev,noexec,relatime,mode=700)
+  cgroup on /sys/fs/cgroup/hugetlb type cgroup (rw,nosuid,nodev,noexec,relatime,hugetlb)
+  cgroup on /sys/fs/cgroup/cpu,cpuacct type cgroup (rw,nosuid,nodev,noexec,relatime,cpu,cpuacct)
+  cgroup on /sys/fs/cgroup/net_cls,net_prio type cgroup (rw,nosuid,nodev,noexec,relatime,net_cls,net_prio)
+  cgroup on /sys/fs/cgroup/pids type cgroup (rw,nosuid,nodev,noexec,relatime,pids)
+  cgroup on /sys/fs/cgroup/blkio type cgroup (rw,nosuid,nodev,noexec,relatime,blkio)
+  cgroup on /sys/fs/cgroup/freezer type cgroup (rw,nosuid,nodev,noexec,relatime,freezer)
+  cgroup on /sys/fs/cgroup/memory type cgroup (rw,nosuid,nodev,noexec,relatime,memory)
+  cgroup on /sys/fs/cgroup/rdma type cgroup (rw,nosuid,nodev,noexec,relatime,rdma)
+  cgroup on /sys/fs/cgroup/devices type cgroup (rw,nosuid,nodev,noexec,relatime,devices)
+  cgroup on /sys/fs/cgroup/cpuset type cgroup (rw,nosuid,nodev,noexec,relatime,cpuset)
+  cgroup on /sys/fs/cgroup/perf_event type cgroup (rw,nosuid,nodev,noexec,relatime,perf_event)
+  mqueue on /dev/mqueue type mqueue (rw,nosuid,nodev,noexec,relatime)
+  hugetlbfs on /dev/hugepages type hugetlbfs (rw,relatime,pagesize=2M)
+  debugfs on /sys/kernel/debug type debugfs (rw,nosuid,nodev,noexec,relatime)
+  /dev/vda15 on /boot type vfat (rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro)
+  pstore on /sys/fs/pstore type pstore (rw,nosuid,nodev,noexec,relatime)
+  configfs on /sys/kernel/config type configfs (rw,nosuid,nodev,noexec,relatime)
+  fusectl on /sys/fs/fuse/connections type fusectl (rw,nosuid,nodev,noexec,relatime)
+  tmpfs on /run/user/0 type tmpfs (rw,nosuid,nodev,relatime,size=203772k,nr_inodes=50943,mode=700)
+  #+end_example
+
+  What about the ~fstab~?
+  #+begin_src bash :results verbatim :exports both
+    set -euo pipefail
+    
+    nixops ssh kube-nix -- cat /etc/fstab
+  #+end_src
+
+  #+RESULTS:
+  #+begin_example
+  # This is a generated file.  Do not edit!
+  #
+  # To make changes, edit the fileSystems and swapDevices NixOS options
+  # in your /etc/nixos/configuration.nix file.
+
+  # Filesystems.
+  /dev/vda1 / ext4 defaults 0 1
+  /dev/disk/by-uuid/3A52-0EBB /boot vfat defaults 0 2
+
+
+  # Swap devices.
+
+  #+end_example
+
+  Let's see the ~/home~ and ~/tmp~ directories.
+  #+begin_src bash :results verbatim :exports both
+    set -euo pipefail
+    
+    nixops ssh kube-nix -- ls /
+  #+end_src
+
+  #+RESULTS:
+  #+begin_example
+  bin
+  boot
+  dev
+  etc
+  home
+  nix
+  old-root
+  proc
+  root
+  run
+  srv
+  sys
+  tmp
+  usr
+  var
+  #+end_example
+  
+  They're there but not managed by the ~home.mount~ or ~tmp.mount~ unit.
+  
+  Probably we can ignore those 2 unit warnings.
+
+*** Mounting tmp on tmpfs
+
+    The ~boot.tmpOnTmpfs~[fn:2] option may help with the ~tmp.mount~ issue.
+    
+    Let's update the ~nix-the-hard-way.nix~ file.
+
+    #+name: Adding the tmpOnTmpfs parameter
+    #+begin_src nix :tangle nix-the-hard-way.nix
+      {
+        network.description = "Nix the hard way, experimental Kubernetes deployment";
+        kube-nix =
+          { config, pkgs, modulesPath, ... }:
+          {
+            deployment = {
+              targetHost = "nix.gesz.dev";
+            };
+      
+            imports = [ (modulesPath + "/profiles/qemu-guest.nix") ];
+      
+            boot = {
+              loader.grub = {
+                efiSupport = true;
+                efiInstallAsRemovable = true;
+                device = "nodev";
+              };
+              initrd.kernelModules = [ "nvme" ];
+              tmpOnTmpfs = true;
+            };
+      
+            networking = {
+              hostName = "kube-nix";
+              firewall.allowPing = true;
+            };
+      
+            services = {
+              openssh.enable = true;
+            };
+      
+            users.users.root.openssh.authorizedKeys.keys = [
+              "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3luLP4zUjd+AX7VA2LTBkCNVv9OA/nPT4cBqHmilGS84LiWC15zFTc84ybqWPmxme0Y9ACR0ok1p8InmuCUSTdgzQ2b2JakxH9ryS4uyKCmxRhrN7z3b3fOax5SHW5P6MGhvvVNpzef5b/OpqLEsfxO4AjgRgk1gx/6Z8y4333N/D74jO8Da1x/3KTpIi0MBMSGUShce2b6sny64s4covW0wcEniCXc86HjG/mn9lP91dpyXydt9gNYFvg2fby+u4WCXSwCelHSVL8hb8piuw/2cAhveDnzgCgoF2HISan5yg394giEssheU1ySGU+MtuxoErUb/6isxX7ewoEKMV gergely@gregorian"
+            ];
+            fileSystems."/boot" = { device = "/dev/disk/by-uuid/3A52-0EBB"; fsType = "vfat"; };
+            fileSystems."/" = { device = "/dev/vda1"; fsType = "ext4"; };
+      
+      
+            environment.systemPackages = with pkgs; [ neofetch vim ];
+          };
+      }
+    #+end_src
+    
+    Let's deploy the changes:
+
+    #+begin_src bash :results verbatim :exports both
+      nixops deploy -d hard-way
+    #+end_src
+
+    #+RESULTS:
+
+    Check again:
+
+    #+begin_src bash :results verbatim :exports both
+      set -euo pipefail
+      
+      nixops check || true
+    #+end_src
+
+    #+RESULTS:
+    #+begin_example
+    Machines state:
+    +----------+--------+-----+-----------+----------+----------------+-----------------------+-------+
+    | Name     | Exists | Up  | Reachable | Disks OK | Load avg.      | Units                 | Notes |
+    +----------+--------+-----+-----------+----------+----------------+-----------------------+-------+
+    | kube-nix | Yes    | Yes | Yes       | N/A      | 0.03 0.01 0.00 | ● home.mount [failed] |       |
+    +----------+--------+-----+-----------+----------+----------------+-----------------------+-------+
+    Non machines resources state:
+    +------+--------+
+    | Name | Exists |
+    +------+--------+
+    +------+--------+
+    #+end_example
+
+    ~tmp.mount~ issue fixed!
+    
+* Footnotes
+  
+[Fn:1] https://github.com/kelseyhightower/kubernetes-the-hard-way/tree/79a3f79b27bd28f82f071bb877a266c2e62ee506
+[fn:2] https://nixos.org/manual/nixos/stable/options.html#opt-boot.tmpOnTmpfs 
