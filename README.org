@@ -1,0 +1,31 @@
+* Goal
+
+  The goal of this exercise is to replicate the Kubernetes the hard way[fn:1]
+  steps by using NixOS and NixOps as much as possible.
+
+* The basic setup
+
+  We want to have a self-contained setup. These environment variables are used
+  during our exercise.
+  
+  | Name         | Value                      | Meaning                                               |
+  | NIXOPS_STATE | .nixops/deployments.nixops | Path to the state file that contains the deployments. |
+
+  First, create a network file called ~nix-the-hard-way.nix~:
+
+  #+name: Initial version of nix-the-hard-way.nix
+  #+begin_src nix :tangle nix-the-hard-way.nix
+    {
+      nix =
+        { config, pkgs, modulesPath, ... }:
+        {
+          deployment = {
+            targetHost = "nix.gesz.dev";
+          };
+        };
+    }
+  #+end_src
+  
+* Footnotes
+
+[fn:1] https://github.com/kelseyhightower/kubernetes-the-hard-way/tree/79a3f79b27bd28f82f071bb877a266c2e62ee506
